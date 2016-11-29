@@ -19,3 +19,74 @@ Aspose.Cells.License lic = new Aspose.Cells.License();
                 rowsCount = workSheet.Cells.Rows.Count;
                 return workSheet;
             }
+            ------------------------------------------------------------------------
+            
+            Aspose.Cells.License lic = new Aspose.Cells.License();            
+
+            lic.SetLicense(Path + @"\Aspose.Cells.lic");
+
+
+            using (Stream fileStream = fi.OpenRead())
+
+            {
+
+                Workbook workBook = new Workbook(fileStream);                
+
+                
+
+                Worksheet workSheet = workBook.Worksheets[0];
+
+
+                FindOptions fo = new FindOptions()
+
+                {
+
+                    CaseSensitive = false
+
+                };
+
+
+                Cell headerFirstCell = workSheet.Cells.Find(@"Α/Α", null, fo);
+
+
+                List<string[]> DataRows = new List<string[]>();
+
+
+                if (headerFirstCell != null)
+
+                {
+
+                    //int lastDataRowsCount = -1;
+
+                    for (int i = headerFirstCell.Row + 1; i < workSheet.Cells.Rows.Count; i++)
+
+                    {
+
+                        string[] dataValues = GetDecisionRowValues(workSheet.Cells.Rows[i]);
+
+                        DataRows.Add(dataValues);
+
+                        //if ((lastDataRowsCount != -1) && (lastDataRowsCount != dataValues.Length))
+
+                        //    throw new Exception("Incosistent DataRows Count in file: " + fi.FullName);
+
+                        //else
+
+                        //{
+
+                        //    lastDataRowsCount = dataValues.Length;
+
+                            
+
+                        //}
+
+                    }
+
+                }
+
+                else throw new Exception("No Header found in file: " + fi.FullName);
+
+
+                return DataRows;
+
+            }
