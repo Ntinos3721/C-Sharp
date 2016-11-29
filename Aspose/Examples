@@ -1,0 +1,21 @@
+Aspose.Cells.License lic = new Aspose.Cells.License();            
+            lic.SetLicense(Path + @"\Aspose.Cells.lic");
+
+            using (Stream fileStream = fi.OpenRead())
+            {
+                Workbook workBook = new Workbook(fileStream);
+
+                Worksheet workSheet = workBook.Worksheets[0];
+
+                FindOptions fo = new FindOptions()
+                {
+                    CaseSensitive = false
+                };
+
+                Cell headerFirstCell = workSheet.Cells.Find(@"Α/Α", null, fo);
+                if (headerFirstCell == null)
+                    throw new Exception("No Header found in file: " + fi.FullName);
+                firstRowNumber = GetRowNumberFromCell(headerFirstCell) + 1;
+                rowsCount = workSheet.Cells.Rows.Count;
+                return workSheet;
+            }
