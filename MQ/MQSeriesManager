@@ -1,0 +1,177 @@
+using System;
+using System.Diagnostics;
+using IBM.WMQ;
+using System.IO;
+using System.Text;
+using System.Collections;
+
+namespace xxxx
+{
+    
+    public  class MQSeriesManager
+    {
+        private Hashtable _props = new Hashtable(); 
+
+        public MQSeriesTransactional(string hostname, string channel, int port)
+        {
+            _props.Add(MQC.HOST_NAME_PROPERTY, hostname);
+            _props.Add(MQC.CHANNEL_PROPERTY, channel);
+            _props.Add(MQC.PORT_PROPERTY, port);
+            _props.Add(MQC.TRANSPORT_PROPERTY, MQC.TRANSPORT_MQSERIES_MANAGED); 
+        }
+
+　
+　
+        private IBM.WMQ.MQQueue GetQueue(MQQueueManager qMan, string QueueMgrName, string QueueName_In, int QueueOpenOptions)
+        {
+            IBM.WMQ.MQQueue rv;
+            try
+            {
+                rv = qMan.AccessQueue(QueueName_In, QueueOpenOptions); //MQC.MQOO_INQUIRE)
+                return rv;
+            }
+            catch (System.Exception ex)
+            {
+                string errorStr = string.Format("Unable to AccessQueue for Manager=[{0}] with Name=[{1}] Error=[{2}]]", QueueMgrName, QueueName_In, ex.Message);
+                throw ex;
+            }
+        }
+
+        public bool MQSGetFromQueue_dotNET(string QueueMgrName, string QueueName, out string strMQmsg, out string strMsgId)
+        {
+            MQQueueManager QMan = null;
+            MQQueue Queue = null;
+            MQMessage QMsg = new MQMessage();
+            MQGetMessageOptions QMsgOptions = new MQGetMessageOptions();
+
+            strMQmsg = string.Empty;
+            strMsgId = string.Empty;
+
+            try
+            {
+                QMan = new MQQueueManager(QueueMgrName, _props);
+                Queue = this.GetQueue(QMan, QueueMgrName, QueueName, MQC.MQOO_OUTPUT + MQC.MQOO_INPUT_AS_Q_DEF + MQC.MQOO_FAIL_IF_QUIESCING);
+                QMsgOptions.Options = QMsgOptions.Options | MQC.MQGMO_SYNCPOINT;
+
+                Queue.Get(QMsg, QMsgOptions);
+
+                strMQmsg = this.HandleGreek(QMsg.ReadString(QMsg.MessageLength));
+                strMsgId = this.ByteToHex(QMsg.MessageId).ToUpper();
+                return true;
+            }
+            catch (MQException MQEx)
+            {
+                if (MQEx.ReasonCode != 2033) 
+                    strMQmsg = MQEx.Message;
+                else
+                    strMQmsg = "EOQ";
+                return false;
+            }
+            catch (System.Exception ex)
+            {
+                strMQmsg = ex.Message;
+                return false;
+            }
+            finally
+            {
+                try
+                {
+                    if (Queue != null) Queue.Close();
+                }
+                catch (Exception){}
+
+                try
+                {
+                    if ((QMan != null) && QMan.IsConnected) QMan.Disconnect();
+                }
+                catch (Exception){}
+            }
+        }
+
+        public bool MQSPutInQueue_dotNET(string QueueMgrName, string QueueName, string msg, string MessageFormat, out string errMessage)
+        {
+            MQQueueManager QMan = null;
+            MQQueue Queue = null;
+            MQMessage QMsg = new MQMessage();
+            MQPutMessageOptions QMsgOptions = new MQPutMessageOptions();
+            errMessage = "";
+            try
+            {
+                try
+                {
+                    QMan = new MQQueueManager(QueueMgrName, _props);
+                    Queue = this.GetQueue(QMan, QueueMgrName, QueueName, MQC.MQOO_OUTPUT + MQC.MQOO_FAIL_IF_QUIESCING);
+                    QMsgOptions.Options = QMsgOptions.Options | MQC.MQGMO_SYNCPOINT;
+                    QMsg.CharacterSet = Properties.Settings.Default.MQCharacterSet;
+                    QMsg.Encoding = Properties.Settings.Default.MQEncoding;
+
+                    if (MessageFormat.Trim() == string.Empty)
+                        QMsg.Format = MQC.MQFMT_STRING;
+                    else
+                        QMsg.Format = MessageFormat;
+
+                    QMsg.WriteString(msg);
+
+                    Queue.Put(QMsg, QMsgOptions);
+                    return true;
+                }
+                catch (Exception ex )
+                {
+                    errMessage = ex.Message;
+                    return false;
+                }               
+            }            
+            finally
+            {
+                try
+                {
+                    if (Queue != null) Queue.Close();
+                }
+                catch (Exception) { }
+
+                try
+                {
+                    if ((QMan != null) && QMan.IsConnected) QMan.Disconnect();
+                }
+                catch (Exception) { }
+            }
+        }
+
+        private string ByteToHex(byte[] bytes)
+        {
+            StringBuilder strBuild = new StringBuilder();
+            foreach (byte b in bytes)
+            {
+                strBuild.AppendFormat("{0:x2}", b); 
+            }
+            return strBuild.ToString();
+        }
+
+        private string HandleGreek(string str)
+        {
+            byte[] mbyte;
+            char[] mchar;            
+
+            try
+            {
+                mchar = str.ToCharArray();
+                mbyte = Encoding.Default.GetBytes(str);
+                byte[] returnArray = new byte[mbyte.Length];
+                for (int i = 0; i < mchar.Length; i++)
+                {
+                    returnArray[i] = Convert.ToByte(mchar[i]);
+                }
+                return Encoding.Default.GetString(returnArray);
+            }
+            catch (System.Exception)
+            {
+                return str;
+            }
+        }
+
+        
+    }
+
+　
+    
+}
