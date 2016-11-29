@@ -1,0 +1,9 @@
+QManager = QM_xxxxAT
+QToTeir = BR_EMV_TRAP_TO_TEIR
+QFrom = BL_EMV_XXXXX
+QHostName = 
+QChannel = 
+QPort = 1414
+MQCharacterSet = 813
+MQEncoding = 273
+FileEncoding = windows-1253
