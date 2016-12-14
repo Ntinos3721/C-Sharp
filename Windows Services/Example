@@ -1,0 +1,36 @@
+public MainService()
+        {
+            EventLog.WriteEntry("Deamon", "Main Service", EventLogEntryType.Information);
+            InitializeComponent();            
+        }
+
+        protected override void OnStart(string[] args)
+        {
+           if (Properties.Settings.Default.WriteEventLog)
+                EventLog.WriteEntry("Deamon", " ONSTART BEGIN" + DateTime.Now.ToString(), EventLogEntryType.Information);            
+           SetTimers(); 
+
+            if (Properties.Settings.Default.WriteEventLog)
+                EventLog.WriteEntry("Deamon", " ONSTART END " + DateTime.Now.ToString(), EventLogEntryType.Information);
+        }
+
+        protected override void OnStop()
+        {
+            if (Properties.Settings.Default.WriteEventLog)
+                EventLog.WriteEntry("Deamon", "The Service was Stoped at " + DateTime.Now.ToString(), EventLogEntryType.Information);
+                }
+
+        void SetTimers() 
+        {
+            EventLog.WriteEntry("Deamon", "Setting Timers...", EventLogEntryType.Information);
+
+            //Bypass Certificates
+            System.Net.ServicePointManager.ServerCertificateValidationCallback +=
+            (se, cert, chain, sslerror) => { return true; };            
+
+            _processTimer = new Timer(_ => DoProcessTimer(), null, Properties.Settings.Default.ProcessTimerInterval, Timeout.Infinite);            
+            _uploadTimer = new Timer(_ => DoUploadTimer(), null, Properties.Settings.Default.UploadTimerInterval, Timeout.Infinite);            
+            _decisionTimer = new Timer(_ => DoDecisionTimer(), null, Properties.Settings.Default.DecisionTimerInterval, Timeout.Infinite);            
+            _error_RecallTimer = new Timer(_ => DoError_RecallTimer(), null, Properties.Settings.Default.ErrorTimerInterval, Timeout.Infinite);            
+            _spsUpdateTimer = new Timer(_ => DoSPSUpdateTimer(), null, Properties.Settings.Default.SPSTimerInterval, Timeout.Infinite);            
+        }
