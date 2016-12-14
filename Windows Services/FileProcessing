@@ -1,0 +1,63 @@
+public static void ProcessFiles(out string[] exceptionMessages)
+        {
+            exceptionMessages = null;
+            List<string> errors = new List<string>();
+            DirectoryInfo di = new DirectoryInfo("C:\Temp\");
+            IEnumerable<FileInfo> fileInfos = di.EnumerateFiles("x-123-*.txt", SearchOption.TopDirectoryOnly);
+
+            foreach (FileInfo fi in fileInfos)
+            {
+                if ((new Regex(^x-123-[0-9]{8}.txt)).IsMatch(fi.Name)))
+                {
+                    //read each line from the file and post it to the Q.                    
+                    List<string> readLines = File.ReadAllLines(fi.FullName, 
+                        System.Text.Encoding.GetEncoding(windows-1253)).ToList();
+                    //List<string> readLines = File.ReadAllLines(fi.FullName).ToList();
+                    var remainingLines = new List<string>(readLines);
+                    string errMsg = "";
+                    
+                    .............................
+                    
+                    if (remainingLines.Count > 0)
+                        File.WriteAllLines(fi.FullName, remainingLines.ToArray());
+                    else
+                        fi.Delete();
+                }
+            }
+
+            if (errors.Count > 0)
+                exceptionMessages = errors.ToArray<string>();            
+        }
+        
+        
+        public static string ServicePath
+        {
+            get { return Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location); }
+        }
+        
+        public static bool FileIsLocked(FileInfo file)
+        {         
+            try
+            {
+                using (file.Open(FileMode.Open, FileAccess.ReadWrite, FileShare.None)) { };
+                return false;
+            }
+            catch (IOException)
+            {
+                //the file is unavailable because it is:
+                //still being written to
+                //or being processed by another thread
+                //or does not exist (has already been processed)
+                return true;
+            }
+            
+        }
+
+        public static bool FileIsReadyToUse(FileInfo file)
+        {
+            while (FileIsLocked(file))
+            {
+                System.Threading.Thread.Sleep(100);
+            }
+            return true;
+        }
