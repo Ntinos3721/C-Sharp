@@ -1,0 +1,478 @@
+namespace Monitor
+{
+    
+
+    using System;
+    using System.Collections.Generic;
+    using System.Linq;
+    using System.Text;
+    using System.Diagnostics;
+    using System.IO;
+    using System.Text.RegularExpressions;
+    using System.Globalization;
+    using System.Reflection;
+    using System.Security.Principal;
+
+    
+
+    class Program : IDisposable
+    {
+               
+        private static readonly string ApplicationName = Assembly.GetExecutingAssembly().GetName().Name;
+      
+
+        private TextWriter OutWriter;
+        private TextWriter Writer;
+        private double Progress;
+
+        private readonly Func<IEnumerable<string>> OpenInputFile;
+        private readonly Func<IEnumerable<string>, IEnumerable<TransferCommand>> ReadInputFile;
+        private readonly Func<IEnumerable<TransferCommand>, IEnumerable<TransferCommand>> ExecuteCommands;
+        private readonly Func<IEnumerable<TransferCommand>, IEnumerable<TransferCommand>> ReportProgress;
+        private readonly Func<IEnumerable<TransferCommand>, IEnumerable<TransferCommand>> WriteOutputFile;
+        private readonly Action<IEnumerable<TransferCommand>> Process;
+
+        
+
+        static void Main(string[] args)
+        {
+            using (var program = new Program())
+            {
+                try
+                {
+                    Program.RegisterBatch(args);
+                    program.Run();
+                }
+                catch { }
+            }
+        }
+
+        static void RegisterBatch(string[] args)
+        {
+            var registerBatch = args.Any(x => x.ToUpper().Contains("/MYBATCH"));
+            var identity = WindowsIdentity.GetCurrent();
+
+            Console.WriteLine("User: '{0}'.", identity.Name);
+
+            try
+            {
+                if (!EventLog.SourceExists(ApplicationName))
+                    EventLog.CreateEventSource(ApplicationName, "Application");
+
+                if (registerBatch)
+                {
+                    Console.WriteLine("Successfully Logged-On as Batch.");
+
+                    try
+                    {
+                        EventLog.WriteEntry(Program.ApplicationName, "Successfully Logged On as Batch.", EventLogEntryType.Information);
+                    }
+                    catch { }
+
+                    identity = WindowsIdentity.GetCurrent();
+
+                    Console.WriteLine("(NEW) User: '{0}'.", identity.Name);
+                }
+                else
+                {
+                    Console.WriteLine("Failed to Log-On as Batch.");
+
+                    try
+                    {
+                        EventLog.WriteEntry(Program.ApplicationName, "Failure.", EventLogEntryType.Warning);
+                    }
+                    catch { }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Fatal Error: Failed to Log-On as Batch: '{0}'", ex.Message);
+
+                try
+                {
+                    EventLog.WriteEntry(Program.ApplicationName, string.Format("Fatal Error: Failed to Log-On as Batch: '{0}'", ex.Message), EventLogEntryType.Error);
+                }
+                catch { }
+
+                throw;
+            }
+        }
+
+        public Program()
+        {
+            this.OpenInputFile = this.OpenInputFileImpl;
+            this.ReadInputFile = this.ReadInputFileImpl;
+            this.ExecuteCommands = this.ExecuteCommandsImpl;
+            this.ReportProgress = this.ReportProgressImpl;
+            this.WriteOutputFile = this.WriteOutputFileImpl;
+            this.Process = this.ProcessImpl;
+
+            this.OutWriter = Console.Out;
+        }
+
+        public void Run()
+        {
+            try
+            {
+                this.EnsureConfigIsValid();
+                this.Init();
+
+                this.Start();
+                this.Run();
+
+                ImportHelpers.Info("[Transfer]");
+                ImportHelpers.Info("-------------------");
+
+                this
+                .OpenInputFile
+                .Then(this.ReadInputFile)
+                .Then(this.ExecuteCommands)
+                .Then(this.ReportProgress)
+                .Then(this.WriteOutputFile)
+                .Then(this.Process)();
+
+                this.End(true, null);
+            }
+            catch (Exception ex1)
+            {
+                ImportHelpers.Err(string.Empty);
+                ImportHelpers.Err("Fatal error:");
+                ImportHelpers.Err("-------------------");
+                ImportHelpers.Err(ex1.ToString());
+                ImportHelpers.Err(string.Empty);
+                ImportHelpers.Info("Finished with errors.");
+
+                try
+                {
+                    this.End(false, ex1);
+                }
+                catch (Exception ex2)
+                {
+                    ImportHelpers.Err("-------------------");
+                    ImportHelpers.Err(ex2.ToString());
+                }
+            }
+        }
+
+        private void Init()
+        {
+            if (!Directory.Exists(Path.GetDirectoryName(Settings.Default.OutFile)))
+                Directory.CreateDirectory(Path.GetDirectoryName(Settings.Default.OutFile));
+
+            if (!string.IsNullOrEmpty(Settings.Default.LogOutFile))
+            {
+                this.OutWriter = new StreamWriter(
+                    File.Open(
+                        Settings.Default.LogOutFile,
+                        FileMode.Create,
+                        FileAccess.ReadWrite
+                    )
+                );
+            }
+
+            this.Writer = new StreamWriter(
+                File.Open(
+                    Settings.Default.OutFile,
+                    FileMode.Create,
+                    FileAccess.ReadWrite
+                )
+            );
+
+            ImportHelpers.LogWriter = this.OutWriter;
+            ImportHelpers.PrintOnConsoleOut = true;
+        }
+
+        private void EnsureConfigIsValid()
+        {
+            var validations = new Func<Tuple<bool, string>>[]
+            {
+                () => new Tuple<bool, string>(!string.IsNullOrEmpty(Settings.Default.InputFile.ToStringSafe().Trim()), "You must set 'InputFile'."),
+                () => new Tuple<bool, string>(!string.IsNullOrEmpty(Settings.Default.OutFile.ToStringSafe().Trim()), "You must set 'OutFile'."),
+                () => new Tuple<bool, string>(!string.IsNullOrEmpty(Settings.Default.SBL_MonitoringConnectionString.ToStringSafe().Trim()), "You must set 'SBL_MonitoringConnectionString'.")
+            };
+
+            var isValid =
+                validations.Select(x =>
+                    {
+                        var t = x();
+                        if (!t.Item1)
+                            ImportHelpers.Err("Invalid config > {0}", t.Item2);
+
+                        return t.Item1;
+                    }
+                )
+                .Aggregate(ImportHelpers.AND);
+
+            if (!isValid)
+                throw new InvalidOperationException("Config is not configured properly.");
+        }
+
+        private IEnumerable<string> OpenInputFileImpl()
+        {
+            Debug.Assert(!string.IsNullOrEmpty(Settings.Default.InputFile));
+
+            var encoding = string.IsNullOrEmpty(Settings.Default.EncodingName)
+                ? Encoding.GetEncoding(DefaultEncoding.HeaderName)
+                : Encoding.GetEncoding(Settings.Default.EncodingName);
+
+            var newLineBytes = encoding.GetByteCount(Environment.NewLine);
+            var currentSize = default(double);
+
+            using (var fileReader = new StreamReader(File.Open(Settings.Default.InputFile, FileMode.Open, FileAccess.Read, FileShare.Read), encoding))
+            {
+                var totalSize = Convert.ToDouble(fileReader.BaseStream.Length);
+
+                while (!fileReader.EndOfStream)
+                {
+                    string line = fileReader.ReadLine();
+
+                    currentSize += (double)encoding.GetByteCount(line) + newLineBytes;
+                    Progress = Math.Round(((currentSize / totalSize) * 100).ConstraintTo(0, 100d), 0);
+
+                    if (!string.IsNullOrEmpty(line.Trim()))
+                        yield return line;
+                }
+
+                Progress = 100d;
+            }
+        }
+
+        private IEnumerable<TransferCommand> ReadInputFileImpl(IEnumerable<string> lines)
+        {
+            Debug.Assert(lines != null);
+
+            foreach (var line in lines)
+            {
+                var type = line.Substring(0, 2);
+                var branchFrom = line.Substring(2, 4);
+                var branchTo = line.Substring(6, 4);
+
+                var typeEnum = type == "01"
+                    ? TransferCommandType.Branch
+                    : type == "02"
+                        ? TransferCommandType.Customer
+                        : TransferCommandType.Undefined;
+
+                var command = new TransferCommand
+                {
+                    InputFileTextLine = line,
+                    Type = typeEnum,
+                    BranchCodeFrom = branchFrom,
+                    BranchCodeTo = branchTo,
+                    CustomerCode = typeEnum == TransferCommandType.Customer
+                        ? line.Substring(26, 10)
+                        : string.Empty
+                };
+
+                yield return command;
+            }
+        }
+
+        private IEnumerable<TransferCommand> ExecuteCommandsImpl(IEnumerable<TransferCommand> commands)
+        {
+            Debug.Assert(commands != null);
+
+            var utils = new Utils();
+
+            commands = from c in commands
+                       where c.Type != TransferCommandType.Undefined &&
+                             !string.IsNullOrEmpty(c.BranchCodeFrom) &&
+                             !string.IsNullOrEmpty(c.BranchCodeTo) &&
+                             !string.IsNullOrEmpty(c.InputFileTextLine)
+                       where c.Type != TransferCommandType.Customer || !string.IsNullOrEmpty(c.CustomerCode)
+                       select c;
+
+            using (var ctx = DBHelpers.CreateDBContext())
+            {
+                foreach (var command in commands)
+                {
+                    switch (command.Type)
+                    {
+                        case TransferCommandType.Branch:
+                            {
+                                try
+                                {
+                                    var branchCodeToCache = new Dictionary<int, string>();
+
+                                    utils.TransferBranch(
+                                        ctx,
+                                        DefaultUser,
+                                        DefaultUserIP,
+                                        command.BranchCodeFrom,
+                                        command.BranchCodeTo,
+                                        branchCodeToCache
+                                    );
+                                }
+                                catch (Exception ex)
+                                {
+                                    throw new InvalidOperationException(
+                                        string.Format(
+                                            "An error coccured while transfering branch '{0}' -> '{1}'.",
+                                            command.BranchCodeFrom,
+                                            command.BranchCodeTo
+                                        ),
+                                        ex
+                                    );
+                                }
+
+                                yield return command;
+                            }
+                            break;
+                        case TransferCommandType.Customer:
+                            {
+                                try
+                                {
+                                    var branchCodeToCache = new Dictionary<int, string>();
+
+                                    utils.TransferCustomerBranch(
+                                        ctx,
+                                        DefaultUser,
+                                        DefaultUserIP,
+                                        command.CustomerCode,
+                                        command.BranchCodeFrom,
+                                        command.BranchCodeTo,
+                                        branchCodeToCache
+                                    );
+                                }
+                                catch (Exception ex)
+                                {
+                                    throw new InvalidOperationException(
+                                        string.Format(
+                                            "An error coccured while transfering branch '{0}' -> '{1}' for customer '{2}'.",
+                                            command.BranchCodeFrom,
+                                            command.BranchCodeTo,
+                                            command.CustomerCode
+                                        ),
+                                        ex
+                                    );
+                                }
+
+                                yield return command;
+                            }
+                            break;
+                    }
+                }
+
+                ctx.SubmitChanges();
+            }
+        }
+
+        private IEnumerable<TransferCommand> ReportProgressImpl(IEnumerable<TransferCommand> commands)
+        {
+            var prevProgress = Progress;
+
+            foreach (var command in commands)
+            {
+                prevProgress = Progress;
+                ImportHelpers.Info("Progress: {0}%", Progress);
+                yield return command;
+            }
+
+            if (prevProgress != Progress)
+                ImportHelpers.Info("Progress: {0}%", Progress);
+        }
+
+        private IEnumerable<TransferCommand> WriteOutputFileImpl(IEnumerable<TransferCommand> commands)
+        {
+            Debug.Assert(commands != null);
+
+            var targetFile = Settings.Default.TargetFile;
+
+            if (string.IsNullOrEmpty(targetFile))
+            {
+                foreach (var command in commands)
+                    yield return command;
+
+                yield break;
+            }
+
+            if (!Directory.Exists(Path.GetDirectoryName(targetFile)))
+                Directory.CreateDirectory(Path.GetDirectoryName(targetFile));
+
+            var encoding = string.IsNullOrEmpty(Settings.Default.EncodingName)
+                ? Encoding.GetEncoding(DefaultEncoding.HeaderName)
+                : Encoding.GetEncoding(Settings.Default.EncodingName);
+
+            commands = from c in commands
+                       where !string.IsNullOrEmpty(c.InputFileTextLine)
+                       select c;
+
+            var timestamp = DateTime.Now.ToString("yyyyMMddhhmmss");
+
+            var targetFileDir = Path.GetDirectoryName(targetFile);
+            var targetFileName = Path.GetFileName(targetFile);
+            var targetFilePattern = string.Format(@"(?<filename>{0})_(?<timestamp>\w{{14}})", Regex.Escape(targetFileName));
+
+            targetFile = Path.Combine(targetFileDir, string.Format("{0}_{1}", targetFileName, timestamp));
+
+            using (var file = new StreamWriter(File.Open(targetFile, FileMode.Create, FileAccess.ReadWrite), encoding))
+            {
+                foreach (var command in commands)
+                {
+                    file.WriteLine(command.InputFileTextLine);
+                    yield return command;
+                }
+            }
+
+            var backupMaxFiles = Settings.Default.BackupMaxFiles.ToIntSafe();
+
+            if (backupMaxFiles > 0)
+            {
+                var backupFiles = (from f in Directory.GetFiles(targetFileDir)
+                                   let filePattern = Regex.Match(f, targetFilePattern)
+                                   where filePattern.Success && filePattern.Groups["timestamp"].Success
+                                   let dt = DateTime.ParseExact(filePattern.Groups["timestamp"].Value, "yyyyMMddhhmmss", CultureInfo.CurrentCulture)
+                                   orderby dt descending
+                                   select f).ToList();
+
+                var top10BackupFiles = backupFiles.Take(10);
+
+                var backupFilesToDelete = backupFiles.Except(top10BackupFiles);
+
+                foreach (var file in backupFilesToDelete)
+                    File.Delete(Path.Combine(targetFileDir, file));
+            }
+        }
+
+        private void ProcessImpl(IEnumerable<TransferCommand> commands)
+        {
+            Debug.Assert(commands != null);
+            foreach (var command in commands) { }
+        }
+
+        private void Start()
+        {
+        }
+
+        private void Run()
+        {
+        }
+
+        private void End(bool success, Exception ex)
+        {
+            this.Writer.WriteLine("{0}|{0} {1}", Convert.ToInt32(!success), success || ex == null ? string.Empty : ex.Message);
+        }
+
+        public void Dispose()
+        {
+            if (this.Writer != null &&
+                this.Writer != Console.Out &&
+                this.Writer != Console.Error)
+            {
+                this.Writer.Flush();
+                this.Writer.Dispose();
+            }
+
+            if (this.OutWriter != null &&
+                this.OutWriter != Console.Out &&
+                this.OutWriter != Console.Error)
+            {
+                this.OutWriter.Flush();
+                this.OutWriter.Dispose();
+            }
+
+            Console.Out.Flush();
+            Console.Error.Flush();
+        }
+    }
+}
