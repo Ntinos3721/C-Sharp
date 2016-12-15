@@ -1,0 +1,1693 @@
+namespace Monitor
+{
+    #region [ Imports ]
+
+    using System;
+    using System.Collections.Generic;
+    using System.Collections.ObjectModel;
+    using System.ComponentModel;
+    using System.Diagnostics;
+    using System.Globalization;
+    using System.Linq;
+    using System.Linq.Expressions;
+    using System.Reflection;
+    using System.Text;
+    using System.Security.Cryptography;
+
+    #endregion
+
+    public static class FrameworkHelpers
+    {
+        #region [ CPS Functions ]
+
+        // Function composition: Original.
+
+        public static Func<T, U, U> And<T, U>(this Func<T, U, U> f, Func<T, U, U> g)
+        {
+            if (f == null)
+                throw new ArgumentNullException("f");
+            if (g == null)
+                throw new ArgumentNullException("g");
+
+            var z = (Func<T, U, U>)((t, u) => f(t, g(t, u)));
+            return z;
+        }
+
+        public static Func<U> And<T, U>(this Func<T, U> f, Func<T> g)
+        {
+            if (f == null)
+                throw new ArgumentNullException("f");
+            if (g == null)
+                throw new ArgumentNullException("g");
+
+            var z = (Func<U>)(() => f(g()));
+            return z;
+        }
+
+        public static Func<T, V> And<T, U, V>(this Func<U, V> f, Func<T, U> g)
+        {
+            if (f == null)
+                throw new ArgumentNullException("f");
+            if (g == null)
+                throw new ArgumentNullException("g");
+
+            var z = (Func<T, V>)(x => f(g(x)));
+            return z;
+        }
+
+        public static Action And<T>(this Action<T> f, Func<T> g)
+        {
+            if (f == null)
+                throw new ArgumentNullException("f");
+            if (g == null)
+                throw new ArgumentNullException("g");
+
+            var z = (Action)(() => f(g()));
+            return z;
+        }
+
+        public static Action<T> And<T, U>(this Action<U> f, Func<T, U> g)
+        {
+            if (f == null)
+                throw new ArgumentNullException("f");
+            if (g == null)
+                throw new ArgumentNullException("g");
+
+            var z = (Action<T>)(x => f(g(x)));
+            return z;
+        }
+
+        // Function composition: Pipeline.
+
+        public static Func<T, U, U> Then<T, U>(this Func<T, U, U> f, Func<T, U, U> g)
+        {
+            if (f == null)
+                throw new ArgumentNullException("f");
+            if (g == null)
+                throw new ArgumentNullException("g");
+
+            var z = g.And(f);
+            return z;
+        }
+
+        public static Func<U> Then<T, U>(this Func<T> f, Func<T, U> g)
+        {
+            var z = g.And(f);
+            return z;
+        }
+
+        public static Func<T, V> Then<T, U, V>(this Func<T, U> f, Func<U, V> g)
+        {
+            var z = g.And(f);
+            return z;
+        }
+
+        public static Action Then<T>(this Func<T> f, Action<T> g)
+        {
+            var z = g.And(f);
+            return z;
+        }
+
+        public static Action<T> Then<T, U>(this Func<T, U> f, Action<U> g)
+        {
+            var z = g.And(f);
+            return z;
+        }
+
+        [DebuggerStepThrough]
+        public static T IfDefaultThen<T>(this T source, T defaultValue)
+        {
+            return source.IfDefaultThen(() => defaultValue);
+        }
+
+        [DebuggerStepThrough]
+        public static T IfDefaultThen<T>(this T source, Func<T> continuation)
+        {
+            return source.IfDefaultThen(_ => continuation == null ? default(T) : continuation());
+        }
+
+        [DebuggerStepThrough]
+        public static T IfDefaultThen<T>(this T source, Func<T, T> continuation)
+        {
+            return Convert.Equals(source, default(T))
+                ? continuation == null
+                    ? default(T)
+                    : continuation(source)
+                : source;
+        }
+
+        [DebuggerStepThrough]
+        public static R IfNotDefaultThen<T, R>(this T source, Func<R> thenContinuation)
+        {
+            return source.IfNotDefaultThen(thenContinuation, () => default(R));
+        }
+
+        [DebuggerStepThrough]
+        public static R IfNotDefaultThen<T, R>(this T? source, Func<R> thenContinuation)
+            where T : struct
+        {
+            return source.IfNotDefaultThen(thenContinuation, () => default(R));
+        }
+
+        [DebuggerStepThrough]
+        public static R IfNotDefaultThen<T, R>(this T source, Func<T, R> thenContinuation)
+        {
+            return source.IfNotDefaultThen(thenContinuation, () => default(R));
+        }
+
+        [DebuggerStepThrough]
+        public static R IfNotDefaultThen<T, R>(this T? source, Func<T, R> thenContinuation)
+            where T : struct
+        {
+            return source.IfNotDefaultThen(thenContinuation, () => default(R));
+        }
+
+        [DebuggerStepThrough]
+        public static R IfNotDefaultThen<T, R>(this T source, Func<R> thenContinuation, R defaultValue)
+        {
+            return source.IfNotDefaultThen(thenContinuation, () => defaultValue);
+        }
+
+        [DebuggerStepThrough]
+        public static R IfNotDefaultThen<T, R>(this T? source, Func<R> thenContinuation, R defaultValue)
+            where T : struct
+        {
+            return source.IfNotDefaultThen(thenContinuation, () => defaultValue);
+        }
+
+        [DebuggerStepThrough]
+        public static R IfNotDefaultThen<T, R>(this T source, Func<T, R> thenContinuation, R defaultValue)
+        {
+            return source.IfNotDefaultThen(thenContinuation, () => defaultValue);
+        }
+
+        [DebuggerStepThrough]
+        public static R IfNotDefaultThen<T, R>(this T? source, Func<T, R> thenContinuation, R defaultValue)
+            where T : struct
+        {
+            return source.IfNotDefaultThen(thenContinuation, () => defaultValue);
+        }
+
+        [DebuggerStepThrough]
+        public static R IfNotDefaultThen<T, R>(this T source, Func<R> thenContinuation, Func<R> elseContinuation)
+        {
+            return source.IfNotDefaultThen(
+                _ => thenContinuation == null
+                    ? default(R)
+                    : thenContinuation(),
+                _ => elseContinuation == null
+                    ? default(R)
+                    : elseContinuation());
+        }
+
+        [DebuggerStepThrough]
+        public static R IfNotDefaultThen<T, R>(this T? source, Func<R> thenContinuation, Func<R> elseContinuation)
+            where T : struct
+        {
+            return source.IfNotNullableThen(
+                _ => thenContinuation == null
+                    ? default(R)
+                    : thenContinuation(),
+                _ => elseContinuation == null
+                    ? default(R)
+                    : elseContinuation());
+        }
+
+        [DebuggerStepThrough]
+        public static R IfNotDefaultThen<T, R>(this T source, Func<T, R> thenContinuation, Func<R> elseContinuation)
+        {
+            return source.IfNotDefaultThen(
+                _ => thenContinuation == null
+                    ? default(R)
+                    : thenContinuation(source),
+                _ => elseContinuation == null
+                    ? default(R)
+                    : elseContinuation());
+        }
+
+        [DebuggerStepThrough]
+        public static R IfNotDefaultThen<T, R>(this T? source, Func<T, R> thenContinuation, Func<R> elseContinuation)
+            where T : struct
+        {
+            return source.IfNotNullableThen(
+                _ => thenContinuation == null
+                    ? default(R)
+                    : thenContinuation(source.Value),
+                _ => elseContinuation == null
+                    ? default(R)
+                    : elseContinuation());
+        }
+
+        [DebuggerStepThrough]
+        public static R IfNotDefaultThen<T, R>(this T source, Func<R> thenContinuation, Func<T, R> elseContinuation)
+        {
+            return source.IfNotDefaultThen(
+                _ => thenContinuation == null
+                    ? default(R)
+                    : thenContinuation(),
+                _ => elseContinuation == null
+                    ? default(R)
+                    : elseContinuation(source));
+        }
+
+        [DebuggerStepThrough]
+        public static R IfNotDefaultThen<T, R>(this T? source, Func<R> thenContinuation, Func<T?, R> elseContinuation)
+            where T : struct
+        {
+            return source.IfNotNullableThen(
+                _ => thenContinuation == null
+                    ? default(R)
+                    : thenContinuation(),
+                _ => elseContinuation == null
+                    ? default(R)
+                    : elseContinuation(source));
+        }
+
+        [DebuggerStepThrough]
+        public static R IfNotDefaultThen<T, R>(this T source, Func<T, R> thenContinuation, Func<T, R> elseContinuation)
+        {
+            return Convert.Equals(source, default(T)) || thenContinuation == null
+                ? elseContinuation == null
+                    ? default(R)
+                    : elseContinuation(source)
+                : thenContinuation(source);
+        }
+
+        [DebuggerStepThrough]
+        public static R IfNotDefaultThen<T, R>(this T? source, Func<T, R> thenContinuation, Func<T?, R> elseContinuation)
+            where T : struct
+        {
+            return source.IfNotNullableThen(thenContinuation, elseContinuation);
+        }
+
+        [DebuggerStepThrough]
+        private static R IfNotNullableThen<T, R>(this T? source, Func<T, R> thenContinuation, Func<T?, R> elseContinuation)
+            where T : struct
+        {
+            return !source.HasValue || thenContinuation == null
+                ? elseContinuation == null
+                    ? default(R)
+                    : elseContinuation(source)
+                : thenContinuation(source.Value);
+        }
+
+        [DebuggerStepThrough]
+        public static void IfNotDefaultThen<T>(this T source, Action thenContinuation)
+        {
+            if (!Convert.Equals(source, default(T)) && thenContinuation != null)
+                thenContinuation();
+        }
+
+        [DebuggerStepThrough]
+        public static void IfNotDefaultThen<T>(this T? source, Action thenContinuation)
+            where T : struct
+        {
+            if (source.HasValue && thenContinuation != null)
+                thenContinuation();
+        }
+
+        [DebuggerStepThrough]
+        public static void IfNotDefaultThen<T>(this T source, Action<T> thenContinuation)
+        {
+            if (!Convert.Equals(source, default(T)) && thenContinuation != null)
+                thenContinuation(source);
+        }
+
+        [DebuggerStepThrough]
+        public static void IfNotDefaultThen<T>(this T? source, Action<T> thenContinuation)
+            where T : struct
+        {
+            if (source.HasValue && thenContinuation != null)
+                thenContinuation(source.Value);
+        }
+
+        [DebuggerStepThrough]
+        public static T Unless<T>(this T source, Func<T, bool> predicate, T alternateValue)
+        {
+            return source.Unless(predicate, () => alternateValue);
+        }
+
+        [DebuggerStepThrough]
+        public static T Unless<T>(this T source, Func<T, bool> predicate, Func<T> continuation)
+        {
+            if (predicate == null)
+                throw new ArgumentNullException("predicate");
+            if (continuation == null)
+                throw new ArgumentNullException("continuation");
+
+            return predicate(source) ? continuation() : source;
+        }
+
+        [DebuggerStepThrough]
+        public static T Mutate<T>(this T source, Action mutationFunc)
+            where T : class
+        {
+            if (source == null || mutationFunc == null)
+                return source;
+
+            mutationFunc();
+
+            return source;
+        }
+
+        [DebuggerStepThrough]
+        public static T Mutate<T>(this T source, Action<T> mutationFunc)
+            where T : class
+        {
+            if (source == null || mutationFunc == null)
+                return source;
+
+            mutationFunc(source);
+
+            return source;
+        }
+
+        [DebuggerStepThrough]
+        public static T Mutate<T>(this T source, Func<T, T> mutationFunc)
+            where T : class
+        {
+            if (source == null || mutationFunc == null)
+                return source;
+
+            return mutationFunc(source);
+        }
+
+        [DebuggerStepThrough]
+        public static T Mutate<T>(this T source, Func<T> mutationFunc)
+            where T : class
+        {
+            if (source == null || mutationFunc == null)
+                return source;
+
+            return mutationFunc();
+        }
+
+        #endregion
+
+        #region [ String ]
+
+        [DebuggerStepThrough]
+        public static string GetCacheKey(this string source, params object[] suffixes)
+        {
+            if (string.IsNullOrEmpty(source))
+                return source;
+
+            using (var hasher = SHA1.Create())
+            {
+                var result =
+                    hasher.ComputeHash(Encoding.UTF8.GetBytes(source))
+                          .Select(b => Convert.ToString(b, 16))
+                          .JoinToString(string.Empty);
+
+                if (suffixes.Length > 0)
+                    result = string.Format("{0}_{1}", result, suffixes.Select(x => x.ToString()).ToArray().JoinToString("_"));
+
+                return result;
+            }
+        }
+
+        [DebuggerStepThrough]
+        public static string ToStringSafe(this object source)
+        {
+            return source.ToString(string.Empty);
+        }
+
+        [DebuggerStepThrough]
+        public static string ToString(this object source, string defaultValue)
+        {
+            return source == null
+                ? (defaultValue ?? string.Empty)
+                : (source.ToString() ?? string.Empty);
+        }
+
+        [DebuggerStepThrough]
+        public static string ToString(this object source, Func<string> defaultValue)
+        {
+            if (defaultValue == null)
+                throw new ArgumentNullException("defaultValue");
+
+            return source == null ? (defaultValue() ?? string.Empty) : source.ToString();
+        }
+
+        [DebuggerStepThrough]
+        public static string ToString(this string source, string defaultValue)
+        {
+            return string.IsNullOrEmpty(source) ? (defaultValue ?? string.Empty) : source.ToString();
+        }
+
+        [DebuggerStepThrough]
+        public static string ToString(this string source, Func<string> defaultValue)
+        {
+            if (defaultValue == null)
+                throw new ArgumentNullException("defaultValue");
+
+            return string.IsNullOrEmpty(source) ? (defaultValue() ?? string.Empty) : source.ToString();
+        }
+
+        [DebuggerStepThrough]
+        public static int ToIntSafe(this string source)
+        {
+            if (string.IsNullOrEmpty(source))
+                return default(int);
+
+            int result;
+            if (int.TryParse(source, out result))
+                return result;
+            else
+                return default(int);
+        }
+
+        [DebuggerStepThrough]
+        public static double ToDoubleSafe(this string source)
+        {
+            if (string.IsNullOrEmpty(source))
+                return default(double);
+
+            double result;
+            if (double.TryParse(source, out result))
+                return result;
+            else
+                return default(int);
+        }
+
+        [DebuggerStepThrough]
+        public static bool ToBoolSafe(this string source)
+        {
+            if (string.IsNullOrEmpty(source))
+                return default(bool);
+
+            bool result;
+            if (bool.TryParse(source, out result))
+                return result;
+            else
+                return default(bool);
+        }
+
+        [DebuggerStepThrough]
+        public static DateTime? TryParseAsDateTime(this string source, string culture)
+        {
+            var result = source.TryParseAsDateTime(CultureInfo.GetCultureInfo(culture));
+            return result;
+        }
+
+        [DebuggerStepThrough]
+        public static DateTime? TryParseAsDateTime(this string source, CultureInfo cultureInfo)
+        {
+            if (string.IsNullOrEmpty(source))
+                return default(DateTime?);
+            if (cultureInfo == null)
+                throw new ArgumentNullException("cultureInfo");
+
+            DateTime result;
+            if (DateTime.TryParse(source, cultureInfo, DateTimeStyles.NoCurrentDateDefault, out result))
+                return result;
+            else
+                return default(DateTime?);
+        }
+
+        [DebuggerStepThrough]
+        public static decimal? TryParseAsDecimal(this string source, string culture)
+        {
+            var result = source.TryParseAsDecimal(CultureInfo.GetCultureInfo(culture));
+            return result;
+        }
+
+        [DebuggerStepThrough]
+        public static decimal? TryParseAsDecimal(this string source, CultureInfo cultureInfo)
+        {
+            if (string.IsNullOrEmpty(source))
+                return default(decimal?);
+            if (cultureInfo == null)
+                throw new ArgumentNullException("cultureInfo");
+
+            decimal result;
+            if (decimal.TryParse(source, NumberStyles.Any, cultureInfo, out result))
+                return result;
+            else
+                return default(decimal?);
+        }
+
+        [DebuggerStepThrough]
+        public static double? TryParseAsDouble(this string source, string culture)
+        {
+            var result = source.TryParseAsDouble(CultureInfo.GetCultureInfo(culture));
+            return result;
+        }
+
+        [DebuggerStepThrough]
+        public static double? TryParseAsDouble(this string source, CultureInfo cultureInfo)
+        {
+            if (string.IsNullOrEmpty(source))
+                return default(double?);
+            if (cultureInfo == null)
+                throw new ArgumentNullException("cultureInfo");
+
+            double result;
+            if (double.TryParse(source, NumberStyles.Any, cultureInfo, out result))
+                return result;
+            else
+                return default(double?);
+        }
+
+        [DebuggerStepThrough]
+        public static float? TryParseAsFloat(this string source, string culture)
+        {
+            var result = source.TryParseAsFloat(CultureInfo.GetCultureInfo(culture));
+            return result;
+        }
+
+        [DebuggerStepThrough]
+        public static float? TryParseAsFloat(this string source, CultureInfo cultureInfo)
+        {
+            if (string.IsNullOrEmpty(source))
+                return default(float?);
+            if (cultureInfo == null)
+                throw new ArgumentNullException("cultureInfo");
+
+            float result;
+            if (float.TryParse(source, NumberStyles.Any, cultureInfo, out result))
+                return result;
+            else
+                return default(float?);
+        }
+
+        [DebuggerStepThrough]
+        public static int? TryParseAsInteger(this string source, string culture)
+        {
+            var result = source.TryParseAsInteger(CultureInfo.GetCultureInfo(culture));
+            return result;
+        }
+
+        [DebuggerStepThrough]
+        public static int? TryParseAsInteger(this string source, CultureInfo cultureInfo)
+        {
+            if (string.IsNullOrEmpty(source))
+                return default(int?);
+            if (cultureInfo == null)
+                throw new ArgumentNullException("cultureInfo");
+
+            int result;
+            if (int.TryParse(source, NumberStyles.Any, cultureInfo, out result))
+                return result;
+            else
+                return default(int?);
+        }
+
+        [DebuggerStepThrough]
+        public static bool? TryParseAsBool(this string source)
+        {
+            if (string.IsNullOrEmpty(source))
+                return default(bool?);
+
+            bool result;
+            if (bool.TryParse(source, out result))
+                return result;
+            else
+                return default(bool?);
+        }
+
+        [DebuggerStepThrough]
+        public static CultureInfo TryGetCultureInfo(string culture)
+        {
+            CultureInfo result = null;
+
+            try
+            {
+                result = CultureInfo.GetCultureInfo(culture);
+            }
+            catch
+            {
+                result = CultureInfo.CurrentCulture;
+            }
+
+            return result;
+        }
+
+        #endregion
+
+        #region [ Lambda Expressions ]
+
+        //[DebuggerStepThrough]
+        public static string GetMemberName<T>(this Expression<Func<T>> expr)
+        {
+            return expr.GetMemberKV<T>(false).Key;
+        }
+
+        //[DebuggerStepThrough]
+        public static KeyValuePair<string, object> GetMemberKV<T>(this Expression<Func<T>> expr)
+        {
+            return expr.GetMemberKV<T>(null);
+        }
+
+        //[DebuggerStepThrough]
+        public static KeyValuePair<string, object> GetMemberKV<T>(this Expression<Func<T>> expr, Func<T, object> tranformer)
+        {
+            return expr.GetMemberKV<T>(true, tranformer);
+        }
+
+        //[DebuggerStepThrough]
+        public static KeyValuePair<string, object> GetMemberKV<T>(this Expression<Func<T>> expr, bool getValue)
+        {
+            return expr.GetMemberKV<T>(getValue, null);
+        }
+
+        //[DebuggerStepThrough]
+        public static KeyValuePair<string, object> GetMemberKV<T>(this Expression<Func<T>> expr, bool getValue, Func<T, object> tranformer)
+        {
+            object obj;
+            return expr.GetMemberKV(getValue, out obj);
+        }
+
+        //[DebuggerStepThrough]
+        public static KeyValuePair<string, object> GetMemberKV<T>(this Expression<Func<T>> expr, bool getValue, out object obj)
+        {
+            return expr.GetMemberKV<T>(getValue, out obj, null);
+        }
+
+        //[DebuggerStepThrough]
+        public static KeyValuePair<string, object> GetMemberKV<T>(this Expression<Func<T>> expr, bool getValue, out object obj, Func<T, object> tranformer)
+        {
+            if (tranformer == null)
+                tranformer = x => x;
+
+            MemberInfo mInfo = expr.GetMemberInfo<T>(out obj);
+
+            string mName = mInfo.Name;
+            object mValue = null;
+
+            FieldInfo fInfo = mInfo as FieldInfo;
+            PropertyInfo pInfo = mInfo as PropertyInfo;
+
+            if (getValue && fInfo != null)
+            {
+                mValue = fInfo.GetValue(obj);
+                mValue = tranformer == null
+                     ? mValue
+                     : tranformer((T)mValue);
+            }
+            else if (getValue && pInfo != null && pInfo.CanRead)
+            {
+                mValue = pInfo.GetValue(obj, null);
+                mValue = tranformer == null
+                     ? mValue
+                     : tranformer((T)mValue);
+            }
+
+            return new KeyValuePair<string, object>(mName, mValue);
+        }
+
+        //[DebuggerStepThrough]
+        public static MemberInfo GetMemberInfo<T>(this Expression<Func<T>> expr)
+        {
+            if (expr == null)
+                throw new ArgumentNullException("expr");
+
+            var body = expr.Body as MemberExpression;
+
+            if (body == null)
+            {
+                var unaryExpr = expr.Body as UnaryExpression;
+
+                if (unaryExpr == null)
+                    throw new ArgumentException("'expr' should be either an unary expression or a member expression");
+
+                body = unaryExpr.Operand as MemberExpression;
+            }
+
+            if (body == null)
+                throw new ArgumentException("'expr' should be a member expression");
+
+            return body.Member;
+        }
+
+        //[DebuggerStepThrough]
+        public static MemberInfo GetMemberInfo<T>(this Expression<Func<T>> expr, out object obj)
+        {
+            if (expr == null)
+                throw new ArgumentNullException("expr");
+
+            var body = expr.Body as MemberExpression;
+
+            if (body == null)
+            {
+                var unaryExpr = expr.Body as UnaryExpression;
+
+                if (unaryExpr == null)
+                    throw new ArgumentException("'expr' should be either an unary expression or a member expression");
+
+                body = unaryExpr.Operand as MemberExpression;
+            }
+
+            if (body == null)
+                throw new ArgumentException("'expr' should be a member expression");
+
+            LambdaExpression lambdaExpr = Expression.Lambda(body.Expression);
+            Delegate lambdaFunc = lambdaExpr.Compile();
+            obj = lambdaFunc.DynamicInvoke();
+
+            if (obj == null)
+                throw new NullReferenceException(string.Format("Could get a reference to the member's container object ({0}).", body.Member.DeclaringType.Name));
+
+            MemberInfo mInfo = obj.GetType().GetMember(body.Member.Name).FirstOrDefault();
+
+            if (mInfo == null)
+                throw new InvalidOperationException("Member not found.");
+
+            return mInfo;
+        }
+
+        #endregion
+
+        #region [ IEnumerable<T> ]
+
+        [DebuggerStepThrough]
+        public static IDictionary<TKey, TValue> ToDictionary<TKey, TValue>(this IEnumerable<KeyValuePair<TKey, TValue>> source)
+        {
+            if (source == null)
+                throw new ArgumentNullException("source");
+
+            var dict = new Dictionary<TKey, TValue>();
+
+            foreach (var kv in source)
+                dict.Add(kv.Key, kv.Value);
+
+            return dict;
+        }
+
+        [DebuggerStepThrough]
+        public static R Then<T, R>(
+            this IEnumerable<T> source,
+            Func<IEnumerable<T>, R> func)
+        {
+            if (func == null)
+                throw new ArgumentNullException("func");
+
+            var result = func(source);
+            return result;
+        }
+
+        [DebuggerStepThrough]
+        public static IEnumerable<R> If<T, R>(
+            this IEnumerable<T> source,
+            Func<IEnumerable<T>, bool> condition,
+            Func<IEnumerable<T>, IEnumerable<R>> then,
+            Func<IEnumerable<T>, IEnumerable<R>> @else)
+        {
+            if (condition == null)
+                throw new ArgumentNullException("condition");
+            if (then == null)
+                throw new ArgumentNullException("then");
+            if (@else == null)
+                throw new ArgumentNullException("@else");
+
+            var result = condition(source)
+                ? then(source)
+                : @else(source);
+
+            return result;
+        }
+
+        [DebuggerStepThrough]
+        public static IEnumerable<T> Throw<T>(this IEnumerable<T> source, Func<Exception> exception)
+        {
+            if (exception == null)
+                throw new ArgumentNullException("exception");
+
+            foreach (var x in Enumerable.Empty<T>())
+                yield return x;
+
+            throw exception();
+        }
+
+        [DebuggerStepThrough]
+        public static IEnumerable<T> Do<T>(this IEnumerable<T> source, Action<IEnumerable<T>> action)
+        {
+            if (source == null)
+                throw new ArgumentNullException("source");
+
+            source = source.ToListIfNotAList();
+            action(source);
+
+            return source;
+        }
+
+        [DebuggerStepThrough]
+        public static IList<T> ToIList<T>(this IEnumerable<T> source)
+        {
+            if (source == null)
+                throw new ArgumentNullException("source");
+
+            return source.ToList();
+        }
+
+        [DebuggerStepThrough]
+        public static IEnumerable<IList<T>> Partition<T>(this IEnumerable<T> source, int range)
+        {
+            if (source == null)
+                throw new ArgumentNullException("source");
+
+            List<T> lst = null;
+            var enumerator = source.GetEnumerator();
+
+            for (int i = 0; i <= range; i++)
+            {
+                if (i == 0)
+                {
+                    lst = new List<T>();
+                }
+                else if (i == range)
+                {
+                    i = -1;
+                    yield return lst;
+                    continue;
+                }
+
+                if (enumerator.MoveNext())
+                {
+                    lst.Add(enumerator.Current);
+                }
+                else
+                {
+                    yield return lst;
+                    yield break;
+                }
+            }
+        }
+
+        [DebuggerStepThrough]
+        public static void ForEach<T>(this IEnumerable<T> source, Action<T> action)
+        {
+            if (source == null)
+                throw new ArgumentNullException("source");
+            if (action == null)
+                throw new ArgumentNullException("action");
+
+            foreach (var itm in source)
+                action(itm);
+        }
+
+        [DebuggerStepThrough]
+        public static void ForEach<T>(this IEnumerable<T> source, Action<T, int> action)
+        {
+            if (source == null)
+                throw new ArgumentNullException("source");
+            if (action == null)
+                throw new ArgumentNullException("action");
+
+            var index = 0;
+
+            foreach (var itm in source)
+            {
+                var idx = index++;
+                action(itm, idx);
+            }
+        }
+
+        [DebuggerStepThrough]
+        public static bool IsEmpty<T>(this IEnumerable<T> source)
+            where T : class
+        {
+            return source.SkipWhile(i => i == null).FirstOrDefault() == null;
+        }
+
+        [DebuggerStepThrough]
+        public static IEnumerable<T> IsEmpty<T>(this IEnumerable<T> source, IEnumerable<T> defaultValue)
+            where T : class
+        {
+            return source.IsEmpty(() => defaultValue);
+        }
+
+        [DebuggerStepThrough]
+        public static IEnumerable<T> IsEmpty<T>(this IEnumerable<T> source, Func<IEnumerable<T>> continuation)
+            where T : class
+        {
+            return source.IsEmpty()
+                ? continuation == null
+                    ? Enumerable.Empty<T>()
+                    : continuation()
+                : source;
+        }
+
+        [DebuggerStepThrough]
+        public static IEnumerable<TResult> SymmetricZip<TFirst, TSecond, TResult>(
+            this IEnumerable<TFirst> first,
+            IEnumerable<TSecond> second,
+            Func<TFirst, TSecond, TResult> selector)
+        {
+            var result = first.SymmetricZip(second, () => default(TFirst), () => default(TSecond), selector);
+            return result;
+        }
+
+        [DebuggerStepThrough]
+        public static IEnumerable<TResult> SymmetricZip<TFirst, TSecond, TResult>(
+            this IEnumerable<TFirst> first,
+            IEnumerable<TSecond> second,
+            Func<TFirst> defaultFirstGetter,
+            Func<TSecond> defaultSecondGetter,
+            Func<TFirst, TSecond, TResult> selector)
+        {
+            if (first == null)
+                throw new ArgumentNullException("first");
+            if (second == null)
+                throw new ArgumentNullException("second");
+            if (defaultFirstGetter == null)
+                throw new ArgumentNullException("defaultFirstGetter");
+            if (defaultSecondGetter == null)
+                throw new ArgumentNullException("defaultSecondGetter");
+            if (selector == null)
+                throw new ArgumentNullException("selector");
+
+            var ie1 = first.GetEnumerator();
+            var ie2 = second.GetEnumerator();
+
+            bool ie1HasNext = false;
+            bool ie2HasNext = false;
+
+            while ((ie1HasNext = ie1.MoveNext()) | (ie2HasNext = ie2.MoveNext()))
+            {
+                var itm1 = ie1HasNext ? ie1.Current : defaultFirstGetter();
+                var itm2 = ie2HasNext ? ie2.Current : defaultSecondGetter();
+                yield return selector(itm1, itm2);
+            }
+        }
+
+        [DebuggerStepThrough]
+        public static IEnumerable<TResult> AsymmetricZip<TFirst, TSecond, TResult>(
+            this IEnumerable<TFirst> first,
+            IEnumerable<TSecond> second,
+            Func<TFirst, TSecond, TResult> selector)
+        {
+            if (first == null)
+                throw new ArgumentNullException("first");
+            if (second == null)
+                throw new ArgumentNullException("second");
+            if (selector == null)
+                throw new ArgumentNullException("selector");
+
+            var ie1 = first.GetEnumerator();
+            var ie2 = second.GetEnumerator();
+
+            while (ie1.MoveNext() & ie2.MoveNext())
+                yield return selector(ie1.Current, ie2.Current);
+        }
+
+        [DebuggerStepThrough]
+        public static IEnumerable<T> CreateEnumerable<T>(params T[] source)
+        {
+            return source.EmptyIfNull();
+        }
+
+        [DebuggerStepThrough]
+        public static IEnumerable<T> CreateEnumerable<T>(params IEnumerable<T>[] sources)
+        {
+            return from source in sources.EmptyIfNull()
+                   from itm in source.EmptyIfNull()
+                   select itm;
+        }
+
+        [DebuggerStepThrough]
+        public static IList<T> CreateList<T>(params T[] source)
+        {
+            return source.ToListIfNotAList();
+        }
+
+        [DebuggerStepThrough]
+        public static IList<T> ToListIfNotAList<T>(this IEnumerable<T> source)
+        {
+            return source is IList<T>
+                ? source as IList<T>
+                : source.EmptyIfNull().ToList();
+        }
+
+        [DebuggerStepThrough]
+        public static IEnumerable<T> EmptyIfNull<T>(this IEnumerable<T> source, params T[] defaultValues)
+        {
+            bool isEmpty = true;
+
+            source = source ?? Enumerable.Empty<T>();
+            defaultValues = defaultValues ?? new T[0];
+
+            foreach (var itm in source)
+            {
+                isEmpty = false;
+                yield return itm;
+            }
+
+            if (isEmpty)
+                foreach (var itm in defaultValues)
+                    yield return itm;
+        }
+
+        [DebuggerStepThrough]
+        public static IEnumerable<T> Append<T>(this IEnumerable<T> source, Func<IEnumerable<T>, IEnumerable<T>> tail)
+        {
+            if (tail == null)
+                throw new ArgumentNullException("tail");
+
+            return source.Append(tail(source));
+        }
+
+        [DebuggerStepThrough]
+        public static IEnumerable<T> Append<T>(this IEnumerable<T> source, Func<IEnumerable<T>, IEnumerable<IEnumerable<T>>> tails)
+        {
+            if (tails == null)
+                throw new ArgumentNullException("tails");
+
+            return source.Append(tails(source));
+        }
+
+        [DebuggerStepThrough]
+        public static IEnumerable<T> Append<T>(this IEnumerable<T> source, Func<IEnumerable<T>, IEnumerable<IList<T>>> tails)
+        {
+            if (tails == null)
+                throw new ArgumentNullException("tails");
+
+            return source.Append(tails(source));
+        }
+
+        [DebuggerStepThrough]
+        public static IEnumerable<T> Append<T>(this IEnumerable<T> source, params T[] tail)
+        {
+            return source.Append(tail.EmptyIfNull());
+        }
+
+        [DebuggerStepThrough]
+        public static IEnumerable<T> Append<T>(this IEnumerable<T> source, params IEnumerable<T>[] tails)
+        {
+            return source.Append(tails.EmptyIfNull());
+        }
+
+        [DebuggerStepThrough]
+        public static IEnumerable<T> Append<T>(this IEnumerable<T> source, params IList<T>[] tails)
+        {
+            return source.Append(tails.EmptyIfNull());
+        }
+
+        [DebuggerStepThrough]
+        public static IEnumerable<T> Append<T>(this IEnumerable<T> source, IEnumerable<IEnumerable<T>> tails)
+        {
+            foreach (var itm in source.EmptyIfNull())
+                yield return itm;
+
+            foreach (var tail in tails.EmptyIfNull().Where(t => t != null))
+                foreach (var itm in tail)
+                    yield return itm;
+        }
+
+        [DebuggerStepThrough]
+        public static IEnumerable<T> Append<T>(this IEnumerable<T> source, IEnumerable<IList<T>> tails)
+        {
+            foreach (var itm in source.EmptyIfNull())
+                yield return itm;
+
+            foreach (var tail in tails.EmptyIfNull().Where(t => t != null))
+                foreach (var itm in tail)
+                    yield return itm;
+        }
+
+        [DebuggerStepThrough]
+        public static IEnumerable<T> Cons<T>(this T source)
+        {
+            if (source != null)
+                yield return source;
+        }
+
+        [DebuggerStepThrough]
+        public static IEnumerable<T> Cons<T>(this T source, params T[] tail)
+        {
+            return source.Cons(tail.EmptyIfNull());
+        }
+
+        [DebuggerStepThrough]
+        public static IEnumerable<T> Cons<T>(this T source, IEnumerable<T> tail)
+        {
+            if (source != null)
+                yield return source;
+
+            foreach (var itm in tail.EmptyIfNull())
+                yield return itm;
+        }
+
+        [DebuggerStepThrough]
+        public static IEnumerable<T> Cons<T>(this T source, params IEnumerable<T>[] tails)
+        {
+            return source.Cons(tails.EmptyIfNull());
+        }
+
+        [DebuggerStepThrough]
+        public static IEnumerable<T> Cons<T>(this T source, IEnumerable<IEnumerable<T>> tails)
+        {
+            if (source != null)
+                yield return source;
+
+            foreach (var tail in tails.EmptyIfNull())
+                foreach (var itm in tail.EmptyIfNull().Where(t => t != null))
+                    yield return itm;
+        }
+
+        [DebuggerStepThrough]
+        public static IEnumerable<T> Cons<T>(this T source, params IList<T>[] tails)
+        {
+            return source.Cons(tails.EmptyIfNull());
+        }
+
+        [DebuggerStepThrough]
+        public static IEnumerable<T> Cons<T>(this T source, IEnumerable<IList<T>> tails)
+        {
+            if (source != null)
+                yield return source;
+
+            foreach (var tail in tails.EmptyIfNull())
+                foreach (var itm in tail.EmptyIfNull().Where(t => t != null))
+                    yield return itm;
+        }
+
+        [DebuggerStepThrough]
+        public static string JoinToString(this string[] source, string seperator)
+        {
+            var result = string.Join(seperator, source);
+            return result;
+        }
+
+        [DebuggerStepThrough]
+        public static string JoinToString(this IEnumerable<string> source, string seperator)
+        {
+            var result = string.Join(seperator, source.EmptyIfNull().ToArray());
+            return result;
+        }
+
+        [DebuggerStepThrough]
+        public static IEnumerable<T> Union<T, TKey>(
+            this IEnumerable<T> first,
+            IEnumerable<T> second,
+            Func<T, TKey> keySelector)
+        {
+            if (keySelector == null)
+                throw new ArgumentNullException("keySelector");
+
+            var h = new HashSet<TKey>();
+
+            foreach (var itm in first.EmptyIfNull())
+                if (h.Add(keySelector(itm)))
+                    yield return itm;
+
+            foreach (var itm in second.EmptyIfNull())
+                if (h.Add(keySelector(itm)))
+                    yield return itm;
+        }
+
+        [DebuggerStepThrough]
+        public static IEnumerable<T> Intersect<T, TKey>(
+            this IEnumerable<T> first,
+            IEnumerable<T> second,
+            Func<T, TKey> keySelector)
+        {
+            if (keySelector == null)
+                throw new ArgumentNullException("keySelector");
+
+            var h = new HashSet<TKey>();
+
+            foreach (var itm in first.EmptyIfNull())
+                if (h.Add(keySelector(itm)))
+                    yield return itm;
+
+            foreach (var itm in second.EmptyIfNull())
+                if (!h.Add(keySelector(itm)))
+                    yield return itm;
+        }
+
+        [DebuggerStepThrough]
+        public static IEnumerable<T> IntersectIfNotEmpty<T, TKey>(
+            this IEnumerable<T> first,
+            IEnumerable<T> second,
+            Func<T, TKey> keySelector)
+        {
+            if (keySelector == null)
+                throw new ArgumentNullException("keySelector");
+
+            var h = new HashSet<TKey>();
+
+            foreach (var itm in first.EmptyIfNull())
+                h.Add(keySelector(itm));
+
+            foreach (var itm in second.EmptyIfNull())
+                if (h.Count == 0 || h.Contains(keySelector(itm)))
+                    yield return itm;
+        }
+
+        [DebuggerStepThrough]
+        public static IEnumerable<T> Distinct<T, TKey>(this IEnumerable<T> source, Func<T, TKey> keySelector)
+        {
+            if (keySelector == null)
+                throw new ArgumentNullException("keySelector");
+
+            var result = source
+                .EmptyIfNull()
+                .GroupBy(keySelector)
+                .SelectMany(g => g.Take(1));
+
+            return result;
+        }
+
+        [DebuggerStepThrough]
+        public static IEnumerable<T> Distinct<T, TKey>(this IEnumerable<T> source, Func<T, TKey> keySelector, int count)
+        {
+            if (keySelector == null)
+                throw new ArgumentNullException("keySelector");
+
+            count = Math.Max(1, Math.Abs(count));
+
+            var result = source
+                .EmptyIfNull()
+                .GroupBy(keySelector)
+                .SelectMany(g => g.Take(count));
+
+            return result;
+        }
+
+        [DebuggerStepThrough]
+        public static IEnumerable<T> Distinct<T, TKey>(this IEnumerable<T> source, Func<T, TKey> keySelector, Func<T, int> counter)
+        {
+            if (keySelector == null)
+                throw new ArgumentNullException("keySelector");
+            if (counter == null)
+                throw new ArgumentNullException("counter");
+
+            var result = source
+                .EmptyIfNull()
+                .GroupBy(keySelector)
+                .SelectMany(g => g.Take(counter));
+
+            return result;
+        }
+
+        [DebuggerStepThrough]
+        public static IEnumerable<T> Take<T>(this IEnumerable<T> source, Func<T, int> counter)
+        {
+            if (counter == null)
+                throw new ArgumentNullException("counter");
+
+            int index = 0;
+
+            var result = source
+                .EmptyIfNull()
+                .TakeWhile(
+                itm =>
+                {
+                    var i = index++;
+                    return i < counter(itm);
+                });
+
+            return result;
+        }
+
+        #endregion
+
+        #region [ Enums ]
+
+        public static T ToEnum<T>(this string source)
+        {
+            return source.ToEnum<T>(true);
+        }
+
+        public static T ToEnum<T>(this string source, bool ignoreCase)
+        {
+            if (string.IsNullOrEmpty(source))
+                throw new ArgumentNullException(source);
+
+            var result = (T)Enum.Parse(typeof(T), source, ignoreCase);
+            return result;
+        }
+
+        public static T ToEnum<T>(this string source, T defaultValue)
+        {
+            return source.ToEnum<T>(true, defaultValue);
+        }
+
+        public static T ToEnum<T>(this string source, bool ignoreCase, T defaultValue)
+        {
+            if (string.IsNullOrEmpty(source))
+                return defaultValue;
+
+            T result = default(T);
+
+            try
+            {
+                result = (T)Enum.Parse(typeof(T), source, ignoreCase);
+            }
+            catch
+            {
+                result = defaultValue;
+            }
+
+            return result;
+        }
+
+        #endregion
+
+        #region [ DateTime ]
+
+        public static DateTime GetFirstDayOfWeek(this DateTime dt)
+        {
+            var result = dt.GetFirstDayOfWeek(CultureInfo.CurrentCulture);
+            return result;
+        }
+
+        public static DateTime GetFirstDayOfWeek(this DateTime dt, string culture)
+        {
+            var cultureInfo = string.IsNullOrEmpty(culture)
+                ? CultureInfo.GetCultureInfo(culture)
+                : CultureInfo.CurrentCulture;
+
+            var result = dt.GetFirstDayOfWeek(cultureInfo);
+            return result;
+        }
+
+        public static DateTime GetFirstDayOfWeek(this DateTime dt, CultureInfo cultureInfo)
+        {
+            if (cultureInfo == null)
+                throw new ArgumentNullException("cultureInfo");
+
+            var result = dt.AddDays(0 - (double)dt.DayOfWeek + (double)cultureInfo.DateTimeFormat.FirstDayOfWeek);
+            return result;
+        }
+
+        public static DateTime GetLastDayOfWeek(this DateTime dt)
+        {
+            var result = dt.GetLastDayOfWeek(CultureInfo.CurrentCulture);
+            return result;
+        }
+
+        public static DateTime GetLastDayOfWeek(this DateTime dt, string culture)
+        {
+            var cultureInfo = string.IsNullOrEmpty(culture)
+                ? CultureInfo.GetCultureInfo(culture)
+                : CultureInfo.CurrentCulture;
+
+            var result = dt.GetLastDayOfWeek(cultureInfo);
+            return result;
+        }
+
+        public static DateTime GetLastDayOfWeek(this DateTime dt, CultureInfo cultureInfo)
+        {
+            if (cultureInfo == null)
+                throw new ArgumentNullException("cultureInfo");
+
+            var result = dt.AddDays(6 - (double)dt.DayOfWeek + (double)cultureInfo.DateTimeFormat.FirstDayOfWeek);
+            return result;
+        }
+
+        public static IEnumerable<Tuple<DateTime, DateTime>> GetWeeklyPeriods(DateTime dtStart, DateTime dtEnd)
+        {
+            var result = GetWeeklyPeriods(dtStart, dtEnd, CultureInfo.CurrentCulture);
+            return result;
+        }
+
+        public static IEnumerable<Tuple<DateTime, DateTime>> GetWeeklyPeriods(DateTime dtStart, DateTime dtEnd, string culture)
+        {
+            var cultureInfo = string.IsNullOrEmpty(culture)
+                ? CultureInfo.CurrentCulture
+                : CultureInfo.GetCultureInfo(culture);
+
+            var result = GetWeeklyPeriods(dtStart, dtEnd, cultureInfo);
+            return result;
+        }
+
+        public static IEnumerable<Tuple<DateTime, DateTime>> GetWeeklyPeriods(DateTime dtStart, DateTime dtEnd, CultureInfo cultureInfo)
+        {
+            const int daysOfWeek = 7;
+
+            if (cultureInfo == null)
+                throw new ArgumentNullException("cultureInfo");
+
+            var dtDiff = (int)Math.Ceiling((double)(dtEnd - dtStart).Days / (double)daysOfWeek) + 1;
+
+            if (dtDiff < 0)
+                throw new ArgumentOutOfRangeException("'start' must be lower than or equal to 'end'");
+
+            var result = from i in Enumerable.Range(0, dtDiff)
+                         let periodStart = dtStart.AddDays(i * daysOfWeek)
+                         where periodStart < dtEnd
+                         let periodEndTmp = dtStart.AddDays(i * daysOfWeek + daysOfWeek - 1)
+                         let periodEnd = periodEndTmp > dtEnd ? dtEnd : periodEndTmp
+                         let period = new Tuple<DateTime, DateTime>(periodStart, periodEnd)
+                         select period;
+
+            return result;
+        }
+
+        #endregion
+
+        #region [ Int ]
+
+        public static byte ConstraintTo(this byte source, byte min, byte max)
+        {
+            var result = Math.Max(min, Math.Min(max, source));
+            return result;
+        }
+
+        public static decimal ConstraintTo(this decimal source, decimal min, decimal max)
+        {
+            var result = Math.Max(min, Math.Min(max, source));
+            return result;
+        }
+
+        public static double ConstraintTo(this double source, double min, double max)
+        {
+            var result = Math.Max(min, Math.Min(max, source));
+            return result;
+        }
+
+        public static float ConstraintTo(this float source, float min, float max)
+        {
+            var result = Math.Max(min, Math.Min(max, source));
+            return result;
+        }
+
+        public static int ConstraintTo(this int source, int min, int max)
+        {
+            var result = Math.Max(min, Math.Min(max, source));
+            return result;
+        }
+
+        public static long ConstraintTo(this long source, long min, long max)
+        {
+            var result = Math.Max(min, Math.Min(max, source));
+            return result;
+        }
+
+        public static sbyte ConstraintTo(this sbyte source, sbyte min, sbyte max)
+        {
+            var result = Math.Max(min, Math.Min(max, source));
+            return result;
+        }
+
+        public static short ConstraintTo(this short source, short min, short max)
+        {
+            var result = Math.Max(min, Math.Min(max, source));
+            return result;
+        }
+
+        public static uint ConstraintTo(this uint source, uint min, uint max)
+        {
+            var result = Math.Max(min, Math.Min(max, source));
+            return result;
+        }
+
+        public static ulong ConstraintTo(this ulong source, ulong min, ulong max)
+        {
+            var result = Math.Max(min, Math.Min(max, source));
+            return result;
+        }
+
+        public static ushort ConstraintTo(this ushort source, ushort min, ushort max)
+        {
+            var result = Math.Max(min, Math.Min(max, source));
+            return result;
+        }
+
+        public static DateTime ConstraintTo(this DateTime source, DateTime min, DateTime max)
+        {
+            var result = source < min
+                ? min
+                : source > max
+                    ? max
+                    : source;
+
+            return result;
+        }
+
+        #endregion
+
+        #region [ Dictionary ]
+
+        public static V TryGet<K, V>(this IDictionary<K, V> source, K key)
+        {
+            if (source == null)
+                throw new ArgumentNullException("source");
+
+            V value;
+
+            if (source.TryGetValue(key, out value))
+                return value;
+            else
+                return default(V);
+        }
+
+        #endregion
+
+        #region [ Stopwatch ]
+
+        public static void Time(this Action proc, string message)
+        {
+            if (proc == null)
+                throw new ArgumentNullException("proc");
+
+            var watch = new Stopwatch();
+            watch.Time(message, proc);
+        }
+
+        public static void Time(this Action proc, Func<string> message)
+        {
+            if (proc == null)
+                throw new ArgumentNullException("proc");
+
+            var watch = new Stopwatch();
+            watch.Time(message, proc);
+        }
+
+        public static void Time(this Action proc, Action preProc, Action<Stopwatch> postProc)
+        {
+            if (proc == null)
+                throw new ArgumentNullException("proc");
+
+            var watch = new Stopwatch();
+            watch.Time(preProc, proc, postProc);
+        }
+
+        public static R Time<R>(this Func<R> proc, string message)
+        {
+            if (proc == null)
+                throw new ArgumentNullException("proc");
+
+            var watch = new Stopwatch();
+            var result = watch.Time(message, proc);
+
+            return result;
+        }
+
+        public static R Time<R>(this Func<R> proc, Func<R, string> message)
+        {
+            if (proc == null)
+                throw new ArgumentNullException("proc");
+
+            var watch = new Stopwatch();
+            var result = watch.Time(message, proc);
+
+            return result;
+        }
+
+        public static R Time<R>(this Func<R> proc, Action preProc, Action<R, Stopwatch> postProc)
+        {
+            if (proc == null)
+                throw new ArgumentNullException("proc");
+
+            var watch = new Stopwatch();
+            var result = watch.Time(preProc, proc, postProc);
+
+            return result;
+        }
+
+        public static void Time(this Stopwatch watch, string message, Action proc)
+        {
+            Action<Stopwatch> postProc = w => { Trace.WriteLine(string.Format("{0} ... {1}", message, w.Elapsed), "TIME"); };
+            watch.Time(null, proc, postProc);
+        }
+
+        public static void Time(this Stopwatch watch, Func<string> message, Action proc)
+        {
+            if (watch == null)
+                throw new ArgumentNullException("watch");
+            if (proc == null)
+                throw new ArgumentNullException("proc");
+            if (message == null)
+                throw new ArgumentNullException("message");
+
+            Action<Stopwatch> postProc = w => { Trace.WriteLine(string.Format("{0} ... {1}", message(), w.Elapsed), "TIME"); };
+            watch.Time(null, proc, postProc);
+        }
+
+        public static void Time(this Stopwatch watch, Action preProc, Action proc, Action<Stopwatch> postProc)
+        {
+            if (watch == null)
+                throw new ArgumentNullException("watch");
+            if (proc == null)
+                throw new ArgumentNullException("proc");
+
+            watch.Reset();
+            watch.Start();
+
+            if (preProc != null)
+                preProc();
+
+            proc();
+
+            watch.Stop();
+
+            if (postProc != null)
+                postProc(watch);
+
+            watch.Reset();
+        }
+
+        public static R Time<R>(this Stopwatch watch, string message, Func<R> proc)
+        {
+            Action<R, Stopwatch> postProc = (_, w) => { Trace.WriteLine(string.Format("{0} ... {1}", message, w.Elapsed), "TIME"); };
+
+            var result = watch.Time(null, proc, postProc);
+            return result;
+        }
+
+        public static R Time<R>(this Stopwatch watch, Func<R, string> message, Func<R> proc)
+        {
+            if (watch == null)
+                throw new ArgumentNullException("watch");
+            if (proc == null)
+                throw new ArgumentNullException("proc");
+            if (message == null)
+                throw new ArgumentNullException("message");
+
+            Action<R, Stopwatch> postProc = (r, w) => { Trace.WriteLine(string.Format("{0} ... {1}", message(r), w.Elapsed), "TIME"); };
+
+            var result = watch.Time(null, proc, postProc);
+            return result;
+        }
+
+        public static R Time<R>(this Stopwatch watch, Action preProc, Func<R> proc, Action<R, Stopwatch> postProc)
+        {
+            if (watch == null)
+                throw new ArgumentNullException("watch");
+            if (proc == null)
+                throw new ArgumentNullException("proc");
+
+            watch.Reset();
+            watch.Start();
+
+            if (preProc != null)
+                preProc();
+
+            var result = proc();
+
+            watch.Stop();
+
+            if (postProc != null)
+                postProc(result, watch);
+
+            watch.Reset();
+
+            return result;
+        }
+
+        #endregion
+    }
+}
