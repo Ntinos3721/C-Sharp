@@ -1,0 +1,358 @@
+namespace 
+{
+    #region [ Imports ]
+
+    using System;
+    using System.Collections.Generic;
+    using System.Data;
+    using System.Data.Common;
+    using System.Data.OleDb;
+    using System.Diagnostics;
+    using System.Globalization;
+    using System.Linq;
+    using System.Linq.Expressions;
+    using System.Text;
+    using FieldValidationItem1 = System.Collections.Generic.KeyValuePair<System.Tuple<string, string>, string>;
+    using FieldValidationItem2 = System.Collections.Generic.KeyValuePair<string, System.Collections.Generic.IEnumerable<System.Func<string, System.Tuple<bool, string>>>>;
+    using FieldValidationTuple = System.Tuple<System.Collections.Generic.KeyValuePair<System.Tuple<string, string>, string>, System.Collections.Generic.KeyValuePair<string, System.Collections.Generic.IEnumerable<System.Func<string, System.Tuple<bool, string>>>>>;
+
+    #endregion
+
+    static class Program
+    {
+        #region [ Consts ]
+
+        private static readonly Func<bool, bool, bool> AND = (a, b) => a && b;
+
+        #endregion
+
+        #region [ Target Property Names ]
+
+        private static readonly string DomainGroupPropName = ImportHelpers.GetPropertyName<User>(x => () => x.DomainGroup);
+        private static readonly string UserTypePropName = ImportHelpers.GetPropertyName<User>(x => () => x.UserType);
+        private static readonly string PermissionPropName = ImportHelpers.GetPropertyName<User>(x => () => x.Permission);
+        private static readonly string FakeBranchCodePropName = ImportHelpers.GetPropertyName<User>(x => () => x.FakeBranchCode);
+        private static readonly string BatchImportPropName = ImportHelpers.GetPropertyName<User>(x => () => x.BatchImport);
+
+        #endregion
+
+        #region [ Target Properties ]
+
+        private static readonly string[] TargetProperties = new[]
+        {
+            DomainGroupPropName,
+            UserTypePropName,
+            PermissionPropName,
+            FakeBranchCodePropName,
+            BatchImportPropName
+        };
+
+        #endregion
+
+        static void Main(string[] args)
+        {
+            try
+            {
+                EnsureConfigIsValid();
+
+                ImportHelpers.Info("[Validation]");
+                ImportHelpers.Info("-------------------");
+                if (Validate())
+                {
+                    ImportHelpers.Info("[Import]");
+                    ImportHelpers.Info("-------------------");
+                    Import();
+                    ImportHelpers.Info(string.Empty);
+                    ImportHelpers.Info("Finished.");
+                }
+                else
+                {
+                    ImportHelpers.Info(string.Empty);
+                    ImportHelpers.Info("Finished with errors.");
+                }
+            }
+            catch (Exception ex)
+            {
+                ImportHelpers.Err(string.Empty);
+                ImportHelpers.Err("Fatal error:");
+                ImportHelpers.Err("-------------------");
+                ImportHelpers.Err(ex.ToString());
+                ImportHelpers.Err(string.Empty);
+                ImportHelpers.Info("Finished with errors.");
+            }
+            finally
+            {
+                Console.WriteLine();
+                Console.WriteLine("Press any key to exit.");
+                Console.ReadKey();
+            }
+        }
+
+        static bool Validate()
+        {
+            using (var oledbConn = new OleDbConnection(Settings.Default.SourceOleDbConnectionString))
+            using (var ctx = new DBDataContext(Settings.Default.TargetSqlConnectionString))
+            {
+                var import = new ImportHelpers(
+                    ctx,
+                    ImportHelpers.ParseColumnOrdinalMap(Settings.Default.SourceColumnOrdinalMap),
+                    ImportHelpers.ParseColumnNameMap(Settings.Default.SourceColumnNameMap)
+                )
+                {
+                    Verbose = Settings.Default.Verbose.ToBoolSafe()
+                };
+
+                #region [ Config ]
+
+                var sourceTableName = Settings.Default.SourceTableName;
+                var positionIds = ParsePositionIDs(Settings.Default.PositionIDs);
+                var integerCultureInfo = FrameworkHelpers.TryGetCultureInfo(Settings.Default.IntCulture);
+
+                #endregion
+
+                #region [ Validators ]
+
+                var validators = new Dictionary<string, Func<object, Func<string, Tuple<bool, string>>>>()
+                {
+                    {
+                        "IntegerValidator",
+                        _ => value =>
+                        {
+                            var cultureInfo = integerCultureInfo;
+                            var isValid = string.IsNullOrEmpty(value.Trim()) || value.TryParseAsInteger(cultureInfo).HasValue;
+                            var message = string.Format(
+                                "[IntegerValidator] Η τιμή '{0}' δεν είναι στη σωστή μορφή για την κωδικοσελίδα '{1}'. Η μορφή θα έπρεπε να είναι κάπως έτσι: '{2}'.",
+                                value,
+                                cultureInfo.DisplayName,
+                                (123456).ToString("n", cultureInfo)
+                            );
+
+                            return new Tuple<bool, string>(isValid, message);
+                        }
+                    },
+                    {
+                        "BoolValidator",
+                        _ => value =>
+                        {
+                            var isValid = string.IsNullOrEmpty(value.Trim()) || value.TryParseAsBool().HasValue;
+                            var message = string.Format(
+                                "[BoolValidator] Η τιμή '{0}' δεν είναι στη σωστή μορφή. Η μορφή θα έπρεπε να είναι κάπως έτσι: '{1}' ή '{2}'.",
+                                value,
+                                true,
+                                false
+                            );
+
+                            return new Tuple<bool, string>(isValid, message);
+                        }
+                    }
+                };
+
+                var validatorsPerField = new Dictionary<string, IEnumerable<Func<string, Tuple<bool, string>>>>()
+                {
+                };
+
+                #endregion
+
+                #region [ Validation ]
+
+                var cmd = CreateDbCommand(oledbConn, sourceTableName, positionIds);
+
+                var validations = from record in import.ReadSource2(cmd, TargetProperties)
+                                  let fieldValidators = from field in record
+                                                        join validator in validatorsPerField on field.Key.Item2 equals validator.Key
+                                                        let pairItem1 = new FieldValidationItem1(field.Key, field.Value.ToStringSafe())
+                                                        let pairItem2 = validator
+                                                        let pair = new FieldValidationTuple(pairItem1, pairItem2)
+                                                        select pair
+                                  select fieldValidators;
+
+                Func<int, Func<FieldValidationTuple, bool>> fieldValidation =
+                    recordIndex => field =>
+                    {
+                        var fieldValue = field.Item1.Value;
+                        var fieldName = field.Item1.Key.Item1;
+                        var fieldValidators = field.Item2.Value;
+
+                        var isValidResult = fieldValidators.Aggregate(
+                            new Tuple<bool, IEnumerable<string>>(true, new string[0]),
+                            (v0, v) =>
+                            {
+                                var v1 = v(fieldValue);
+                                return new Tuple<bool, IEnumerable<string>>(
+                                    v0.Item1 && v1.Item1,
+                                    v0.Item2.Append(v1.Item2)
+                                );
+                            }
+                        );
+
+                        var isInvalidMessages = string.Join(", ", isValidResult.Item2.Select((s, i) => string.Format("{0}) {1}", i + 1, s)).ToArray());
+                        var fieldIsValid = isValidResult.Item1;
+
+                        if (!fieldIsValid)
+                        {
+                            ImportHelpers.Err("Invalid data > Row: {0}, Column: '{1}', Messages: {2}", recordIndex, fieldName, isInvalidMessages);
+                            ImportHelpers.Err(string.Empty);
+                        }
+
+                        return fieldIsValid;
+                    };
+
+                var result = validations.Select((r, i) => r.Select(fieldValidation(i + 1)).Append(true).Aggregate(AND)).Append(true).Aggregate(AND);
+
+                #endregion
+
+                return result;
+            }
+        }
+
+        static void Import()
+        {
+            using (var oledbConn = new OleDbConnection(Settings.Default.SourceOleDbConnectionString))
+            using (var ctx = new DBDataContext(Settings.Default.TargetSqlConnectionString))
+            {
+                var import = new ImportHelpers(
+                    ctx,
+                    ImportHelpers.ParseColumnOrdinalMap(Settings.Default.SourceColumnOrdinalMap),
+                    ImportHelpers.ParseColumnNameMap(Settings.Default.SourceColumnNameMap)
+                )
+                {
+                    Verbose = Settings.Default.Verbose.ToBoolSafe()
+                };
+
+                #region [ Config ]
+
+                var sourceTableName = Settings.Default.SourceTableName;
+                var positionIds = ParsePositionIDs(Settings.Default.PositionIDs);
+                var integerCultureInfo = FrameworkHelpers.TryGetCultureInfo(Settings.Default.IntCulture);
+                var userNamePrefix = Settings.Default.UserNamePrefix;
+                var userType = 100;
+                var permission = 1;
+                var batchImport = true;
+
+                #endregion
+
+                #region [ Read ]
+
+                var cmd = CreateDbCommand(oledbConn, sourceTableName, positionIds);
+
+                var records = from input in import.ReadSource1(cmd, TargetProperties)
+                              let output = new User
+                              {
+                                  DomainGroup = input.TryGet(DomainGroupPropName).ToStringSafe().IfNotDefaultThen(x => string.IsNullOrEmpty(x) ? null : string.Format("{0}{1}", userNamePrefix, x)),
+                                  UserType = userType,
+                                  Permission = permission,
+                                  FakeBranchCode = input.TryGet(FakeBranchCodePropName).ToStringSafe(),
+                                  BatchImport = batchImport
+                              }
+                              select output;
+
+                #endregion
+
+                #region [ Write ]
+
+                ImportHelpers.Info("Clearing...");
+                {
+                    foreach (var itm in ctx.Users.Where(x => x.BatchImport))
+                        ctx.Users.DeleteOnSubmit(itm);
+                }
+                ImportHelpers.Info("DONE.");
+
+                ImportHelpers.Info("Importing...");
+                {
+                    foreach (var itm in records)
+                        ctx.Users.InsertOnSubmit(itm);
+                }
+                ImportHelpers.Info("DONE.");
+
+                ImportHelpers.Info("Commiting transaction...");
+                {
+                    ctx.SubmitChanges();
+                }
+                ImportHelpers.Info("DONE.");
+
+                #endregion
+            }
+        }
+
+        #region [ Helpers ]
+
+        private static void EnsureConfigIsValid()
+        {
+            var validations = new Func<Tuple<bool, string>>[]
+            {
+                () => new Tuple<bool, string>(!string.IsNullOrEmpty(Settings.Default.SourceOleDbConnectionString.ToStringSafe().Trim()), "You must set 'SourceOleDbConnectionString'."),
+                () => new Tuple<bool, string>(!string.IsNullOrEmpty(Settings.Default.TargetSqlConnectionString.ToStringSafe().Trim()), "You must set 'TargetSqlConnectionString'."),
+                () => new Tuple<bool, string>(!string.IsNullOrEmpty(Settings.Default.SourceTableName.ToStringSafe().Trim()), "You must set 'SourceTableName'."),
+                () => new Tuple<bool, string>(!string.IsNullOrEmpty(Settings.Default.SourceColumnOrdinalMap.ToStringSafe().Trim()) || !string.IsNullOrEmpty(Settings.Default.SourceColumnNameMap.ToStringSafe().Trim()), "You must set either 'SourceColumnOrdinalMap' or 'SourceColumnNameMap'.")
+            };
+
+            var isValid =
+                validations.Select(x =>
+                    {
+                        var t = x();
+                        if (!t.Item1)
+                            ImportHelpers.Err("Invalid config > {0}", t.Item2);
+
+                        return t.Item1;
+                    }
+                )
+                .Aggregate(AND);
+
+            if (!isValid)
+                throw new InvalidOperationException("Config is not configured properly.");
+        }
+
+        private static OleDbCommand CreateDbCommand(OleDbConnection conn, string tableName, string[] positionIds)
+        {
+            if (conn == null)
+                throw new ArgumentNullException("conn");
+            if (string.IsNullOrEmpty(tableName))
+                throw new ArgumentNullException("tableName");
+            if (positionIds == null)
+                throw new ArgumentNullException("positionIds");
+
+            const string posidParamNamePrefix = "posid";
+
+            var sql = string.Format(
+                "select * from {0} {1}",
+                tableName,
+                positionIds.Length == 0
+                    ? string.Empty
+                    : string.Format(
+                        "where POSITIONID in ({0})",
+                        string.Join(
+                            ", ",
+                            Enumerable
+                            .Range(1, positionIds.Length)
+                            .Select(i => string.Format("@{0}{1}", posidParamNamePrefix, i))
+                            .ToArray()
+                        )
+                    )
+                );
+
+            var cmd = conn.CreateCommand();
+            var cmdParams = positionIds.Select(
+                (id, i) => new OleDbParameter(string.Format("@{0}{1}", posidParamNamePrefix, i + 1), id)
+                {
+                    OleDbType = OleDbType.Integer
+                }
+            ).ToArray();
+
+            cmd.CommandText = sql;
+            cmd.Parameters.AddRange(cmdParams);
+
+            return cmd;
+        }
+
+        private static string[] ParsePositionIDs(string input)
+        {
+            var result = string.IsNullOrEmpty(input.Trim())
+                ? new string[0]
+                : input.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries);
+
+            return result;
+        }
+
+        #endregion
+    }
+}
