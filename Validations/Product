@@ -1,0 +1,23 @@
+public class Product : EntityBase
+    {
+        /// <summary>
+        /// Gets or sets the product type identifier
+        /// </summary>
+        public int ProductTypeId { get; set; }
+        public string Name { get; set; }
+        /// <summary>
+        /// Gets or sets the short description
+        /// </summary>
+        public string ShortDescription { get; set; }
+        /// <summary>
+        /// Gets or sets the full description
+        /// </summary>
+        public string FullDescription { get; set; }
+        protected override void Validate()
+        {
+            if (string.IsNullOrEmpty(Name))
+            {
+                ValidationErrors.Add("Name");
+            }
+        }
+    }
