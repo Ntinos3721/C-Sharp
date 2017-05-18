@@ -1,0 +1,5 @@
+string culture = "el-GR"; //"en -US", "el-GR";
+decimal input = 1500603454308.73m;
+ 
+string f1 = string.Format(System.Globalization.CultureInfo.CreateSpecificCulture(culture), "{0:##,#0.00}", input);
+Console.WriteLine("f1: " + f1);
